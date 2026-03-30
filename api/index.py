@@ -7,32 +7,25 @@ import string
 import time
 import threading
 import requests
-from http.server import BaseHTTPRequestHandler
 
 TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 if not TOKEN or not CHAT_ID:
-    raise Exception("BOT_TOKEN and CHAT_ID not set!")
+    raise Exception("Please set BOT_TOKEN and CHAT_ID in Vercel Environment Variables")
 
 hads = bad = erore = 0
 checked = set()
 lock = threading.Lock()
 
-def check_one(user, chat_id):
+def check_one(user):
     global hads, bad, erore
     user = user.strip().lstrip('@').lower()
 
     with lock:
         if user in checked:
-            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                        json={"chat_id": chat_id, "text": f"@{user} already checked."})
             return
         checked.add(user)
-
-    # Send checking message
-    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                json={"chat_id": chat_id, "text": f"🔍 Checking @{user}..."})
 
     try:
         sess = requests.Session()
@@ -69,54 +62,47 @@ def check_one(user, chat_id):
                 ).text
 
                 if 'SELFIE' in res2.upper():
-                    with lock: hads += 1
+                    hads += 1
                     emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', res2)
                     phone = re.search(r'(\+\d{1,4}[\s\d\-\(\)]{8,})', res2)
                     msg = f"🎯 **SELFIE FOUND!**\n\n👤 @{user}\n📧 {', '.join(set(emails)) or 'None'}\n📞 {phone.group(0) if phone else 'None'}"
-                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg})
+                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
+                                json={"chat_id": CHAT_ID, "text": msg})
                 else:
-                    with lock: bad += 1
-                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                                json={"chat_id": chat_id, "text": f"❌ @{user} → No Selfie"})
+                    bad += 1
             else:
-                with lock: bad += 1
+                bad += 1
         else:
-            with lock: erore += 1
+            erore += 1
 
-    except Exception as e:
-        with lock: erore += 1
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                    json={"chat_id": chat_id, "text": f"⚠️ Timeout/Error on @{user}"})
+    except:
+        erore += 1
 
 
-class handler(BaseHTTPRequestHandler):
-    def do_POST(self):
+# Vercel Serverless Handler
+def handler(request):
+    if request.method == "POST":
         try:
-            content_length = int(self.headers.get('Content-Length', 0))
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data)
-
-            if 'message' in data:
+            data = request.get_json()
+            if data and 'message' in data:
                 text = data['message'].get('text', '')
                 chat_id = data['message']['chat']['id']
 
                 if text.startswith('/check '):
                     username = text.split(maxsplit=1)[1]
-                    threading.Thread(target=check_one, args=(username, chat_id), daemon=True).start()
+                    threading.Thread(target=check_one, args=(username,), daemon=True).start()
+                    return {"status": "ok", "reply": f"🔍 Checking @{username}..."}
 
                 elif text.startswith('/stats'):
-                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                                json={"chat_id": chat_id, "text": f"Selfie: {hads}\nBad: {bad}\nError: {erore}"})
+                    return {"status": "ok", "reply": f"Selfie: {hads}\nBad: {bad}\nError: {erore}"}
 
         except:
             pass
 
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b'ok')
+    return {"status": "ok"}
 
 
-# Set webhook
+# Auto set webhook
 if os.getenv("WEBHOOK_URL"):
     try:
         requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={os.getenv('WEBHOOK_URL')}")
