@@ -4,4 +4,3 @@ colorama
 fastapi
 uvicorn
 python-dotenv
-time
