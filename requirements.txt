@@ -1,0 +1,6 @@
+pyTelegramBotAPI
+requests
+colorama
+fastapi
+uvicorn
+python-dotenv
