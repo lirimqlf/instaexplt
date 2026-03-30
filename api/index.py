@@ -13,7 +13,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 if not TOKEN or not CHAT_ID:
-    raise Exception("BOT_TOKEN and CHAT_ID are required in Environment Variables!")
+    raise Exception("Please set BOT_TOKEN and CHAT_ID in Vercel Environment Variables!")
 
 hads = bad = erore = 0
 checked = set()
@@ -81,9 +81,8 @@ def check_one(user):
         erore += 1
 
 
-# ====================== VERCEL HANDLER ======================
+# ====================== VERCEL REQUIRED HANDLER ======================
 def handler(request):
-    """This is the main entry point for Vercel"""
     if request.method == "POST":
         try:
             data = request.get_json()
@@ -93,26 +92,18 @@ def handler(request):
 
                 if text.startswith("/check "):
                     username = text.split(maxsplit=1)[1]
-                    # Run in background
                     threading.Thread(target=check_one, args=(username,), daemon=True).start()
-                    return {
-                        "statusCode": 200,
-                        "body": f"🔍 Checking @{username}..."
-                    }
+                    return {"statusCode": 200, "body": f"🔍 Checking @{username}..."}
 
                 elif text.startswith("/stats"):
-                    return {
-                        "statusCode": 200,
-                        "body": f"Selfie: {hads}\nBad: {bad}\nError: {erore}"
-                    }
-
+                    return {"statusCode": 200, "body": f"Selfie: {hads}\nBad: {bad}\nError: {erore}"}
         except:
             pass
 
     return {"statusCode": 200, "body": "ok"}
 
 
-# Auto set webhook on cold start
+# Auto set webhook
 if os.getenv("WEBHOOK_URL"):
     try:
         requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={os.getenv('WEBHOOK_URL')}")
