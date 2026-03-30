@@ -8,16 +8,18 @@ import time
 import threading
 import requests
 
+# ====================== CONFIG ======================
 TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 if not TOKEN or not CHAT_ID:
-    raise Exception("Please set BOT_TOKEN and CHAT_ID in Vercel Environment Variables")
+    raise Exception("BOT_TOKEN and CHAT_ID are required in Environment Variables!")
 
 hads = bad = erore = 0
 checked = set()
 lock = threading.Lock()
 
+# ====================== CHECK FUNCTION ======================
 def check_one(user):
     global hads, bad, erore
     user = user.strip().lstrip('@').lower()
@@ -79,30 +81,38 @@ def check_one(user):
         erore += 1
 
 
-# Vercel Serverless Handler
+# ====================== VERCEL HANDLER ======================
 def handler(request):
+    """This is the main entry point for Vercel"""
     if request.method == "POST":
         try:
             data = request.get_json()
-            if data and 'message' in data:
-                text = data['message'].get('text', '')
-                chat_id = data['message']['chat']['id']
+            if data and "message" in data:
+                text = data["message"].get("text", "")
+                chat_id = data["message"]["chat"]["id"]
 
-                if text.startswith('/check '):
+                if text.startswith("/check "):
                     username = text.split(maxsplit=1)[1]
+                    # Run in background
                     threading.Thread(target=check_one, args=(username,), daemon=True).start()
-                    return {"status": "ok", "reply": f"🔍 Checking @{username}..."}
+                    return {
+                        "statusCode": 200,
+                        "body": f"🔍 Checking @{username}..."
+                    }
 
-                elif text.startswith('/stats'):
-                    return {"status": "ok", "reply": f"Selfie: {hads}\nBad: {bad}\nError: {erore}"}
+                elif text.startswith("/stats"):
+                    return {
+                        "statusCode": 200,
+                        "body": f"Selfie: {hads}\nBad: {bad}\nError: {erore}"
+                    }
 
         except:
             pass
 
-    return {"status": "ok"}
+    return {"statusCode": 200, "body": "ok"}
 
 
-# Auto set webhook
+# Auto set webhook on cold start
 if os.getenv("WEBHOOK_URL"):
     try:
         requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={os.getenv('WEBHOOK_URL')}")
